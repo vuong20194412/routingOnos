@@ -5,13 +5,19 @@ import json;
 import heapq;
 from time import time, sleep, strftime, gmtime;
 
-ROUND_TIME = 3;
+SLEEP_TIME = 3;
+EXEC_TIME = 1;
+ROUND_TIME = SLEEP_TIME + EXEC_TIME;
 MAX_TIME = ROUND_TIME * 3600;
+TIMEOUT_FLOW_TIME = ROUND_TIME;
+LIFE_FLOW_TIME = ROUND_TIME;
 
-TOTAL_RATE = 1/1000;
-LOSS_PACKETs_PERCENT = 1;
-LATENCY = 1/10;
+TOTAL_RATE = 1/3;
+LOSS_PACKETs_PERCENT = 1/3;
+LATENCY = 1 - TOTAL_RATE - LOSS_PACKETs_PERCENT;
 
+TOTAL_RATE_NO_UNSPECIFIED = -1;
+LOSS_PACKETS_PERCENT_NO_UNSPECIFIED = -1;
 LATENCY_NO_UNSPECIFIED = -1;
 
 PREFIX_URL = 'http://%(controllerIp)s:8181/onos/v1' % {'controllerIp': 'localhost'};
@@ -45,12 +51,12 @@ def getLatencyFromMaoApp():
 
 def getLinkParams():
     data = {'deviceSrc':[], 'portSrc': [], 'deviceDst':[], 'portDst': [], 
-            'totalRate(Bps)': [], 'lossPkts(%)': [], 'latency(ms)': []
+            'totalRate(Bps)': [], 'lossPkts(%)': [], 'latency(ms)': [],
     };
 
     # find link totalRate, lossPacketsPercent
     links = get('/links')['links'];
-
+    
     for link in links:
 
         src = link['src'];
@@ -61,21 +67,29 @@ def getLinkParams():
         responseDst = get('/statistics/delta/ports/%(device)s/%(port)s' 
                           % {'device': dst['device'], 'port': dst['port']});
         
-        statisticSrc = responseSrc['statistics'][0]['ports'][0];
-        statisticDst = responseDst['statistics'][0]['ports'][0];
-
-        # calculate totalRate
-        sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']);
-        sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']);
-        totalRate =  sentRateSrc + sentRateDst;
-
-        # calculate lossPacketsPercent
-        totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
-        lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
-        if lossPackets < 0: #khong sao vi tre
-            lossPackets = 0;
-        lossPacketsPercent = lossPackets / totalSentPackets * 100;
+        statisticSrc = responseSrc['statistics'][0]['ports'];
+        statisticDst = responseDst['statistics'][0]['ports'];
+    
+        if len(statisticSrc) > 0 and len(statisticDst) > 0:
         
+            statisticSrc = statisticSrc[0];
+            statisticDst = statisticDst[0];
+
+            # calculate totalRate
+            sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']);
+            sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']);
+            totalRate =  sentRateSrc + sentRateDst;
+
+            # calculate lossPacketsPercent
+            totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
+            lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
+            if lossPackets < 0: #khong sao vi tre
+                lossPackets = 0;
+            lossPacketsPercent = lossPackets / totalSentPackets * 100;
+        else:
+            totalRate = TOTAL_RATE_NO_UNSPECIFIED;
+            lossPacketsPercent = LOSS_PACKETS_PERCENT_NO_UNSPECIFIED;
+
         # push to data
         data['deviceSrc'].append(src['device']);
         data['portSrc'].append(src['port']);
@@ -83,7 +97,7 @@ def getLinkParams():
         data['portDst'].append(dst['port']);
         data['totalRate(Bps)'].append(totalRate);
         data['lossPkts(%)'].append(lossPacketsPercent);
-
+        
     # find link latency
 
     latency = getLatencyFromMaoApp();
@@ -104,14 +118,43 @@ def getLinkParams():
     
     return data;
 
-def calculateCost(totalRate, lossPacketsPercent, latency):
-    if  latency == LATENCY_NO_UNSPECIFIED:
-        return 1000;
-    else:
-        return totalRate * TOTAL_RATE + lossPacketsPercent * LOSS_PACKETs_PERCENT + latency * LATENCY;
+def findDistanceAndMinElement(arr, unspecified):
+
+    maxElement = max(arr);
+    minElement = maxElement;
+    unspecifiedCount = 0;
+    for e in arr:
+        if e != unspecified:
+            if e < minElement:
+                minElement = e;
+        else:
+            unspecifiedCount += 1;
+    
+    distance = maxElement - minElement + 10**-8;
+
+    return [distance, minElement, unspecifiedCount];
 
 def prepareDijkstra(data):
 
+    if len(data['totalRate(Bps)']) == 0:
+        return {};
+
+    # calculate distance min totalRate
+    distanceTotalRate, minTotalRate, unspecifiedTotalRateCount = findDistanceAndMinElement(data['totalRate(Bps)'], TOTAL_RATE_NO_UNSPECIFIED);
+    if unspecifiedTotalRateCount > 0: 
+        print("TOTAL_RATE_NO_UNSPECIFIED:", unspecifiedTotalRateCount);
+    
+    # calculate distance min lossPacketsPercent
+    distanceLossPacketsPercent, minLossPacketsPercent, unspecifiedLossPacketsPercentCount = findDistanceAndMinElement(data['lossPkts(%)'], LOSS_PACKETS_PERCENT_NO_UNSPECIFIED);
+    if unspecifiedLossPacketsPercentCount > 0: 
+        print("LOSS_PACKETS_PERCENT_NO_UNSPECIFIED:", unspecifiedLossPacketsPercentCount);
+   
+    # calculate distance min latency
+    distanceLatency, minLatency, unspecifiedLatencyCount = findDistanceAndMinElement(data['latency(ms)'], LATENCY_NO_UNSPECIFIED);
+    if unspecifiedLatencyCount > 0: 
+        print("LATENCY_NO_UNSPECIFIED:", unspecifiedLatencyCount);
+    
+    # adj[deviceId] = [{{'cost': ,'outCurrentPort': ,'nextDeviceId': , 'inNextPort': }}...]
     adj = {};
 
     for i in range(len(data['deviceSrc'])):
@@ -127,8 +170,19 @@ def prepareDijkstra(data):
         inNextPort = data['portDst'][i];
 
         #calculate cost from totalRate, lossPacketsPercent, latency
-        cost = calculateCost(data['totalRate(Bps)'][i], data['lossPkts(%)'][i], data['latency(ms)'][i]);
-
+        cost = 1000;
+        totalRate = data['totalRate(Bps)'][i];
+        lossPacketsPercent = data['lossPkts(%)'][i];
+        latency = data['latency(ms)'][i];
+        if (latency != LATENCY_NO_UNSPECIFIED 
+             and totalRate != TOTAL_RATE_NO_UNSPECIFIED 
+             and lossPacketsPercent != LOSS_PACKETS_PERCENT_NO_UNSPECIFIED
+        ):
+            totalRate = (totalRate - minTotalRate) / distanceTotalRate;
+            lossPacketsPercent = (lossPacketsPercent - minLossPacketsPercent) / distanceLossPacketsPercent;
+            latency = (latency - minLatency) / distanceLatency;
+            cost = totalRate * TOTAL_RATE + lossPacketsPercent * LOSS_PACKETs_PERCENT + latency * LATENCY;
+        
         if currentDeviceId not in adj: 
             adj[currentDeviceId] = [];
         
@@ -221,8 +275,10 @@ def getDeviceMacs():
 
 def createFlow(deviceId, outPort, inPort, dstMac):
 
-    flow = { "tableId": "0", "groupId": 0, "timeout": 0, "priority": 55, "isPermanent": True, "packets": 0, "bytes": 0, "liveType": "UNKNOWN",
-        "deviceId": deviceId, "state": "ADDED", "life": 2000, "appId": "org.onosproject.net.intent",
+    flow = { "tableId": "0", "groupId": 0, "packets": 0, "bytes": 0, 
+            "liveType": "IMMEDIATE", "timeout": TIMEOUT_FLOW_TIME, 
+            "priority": "MAX_PRIORITY", "isPermanent": False,
+        "deviceId": deviceId, "state": "ADDED", "life": LIFE_FLOW_TIME, "appId": "org.onosproject.net.intent",
         "treatment": {
             "instructions": [
                 { "type": "OUTPUT", "port": outPort}
@@ -284,7 +340,19 @@ def updateFlowRule(flows):
     response = postJson('/flows', 
                 params={'appId': 'org.onosproject.net.intent'}, 
                 data=json.dumps({"flows": flows}));
-    print(strftime("%Y-%m-%d %H:%M:%S", gmtime(time())),":",len(response['flows']),"flows");
+
+    _flows = get('/flows/application/org.onosproject.net.intent')['flows'];
+
+    states = {'total': len(_flows)};
+    for _flow in _flows:
+        if _flow["state"] not in states:
+            states[_flow["state"]] = 0;
+        states[_flow["state"]] += 1;
+    
+    print(strftime("%Y-%m-%d %H:%M:%S", gmtime(time())),":");
+    print("\tstate flow rule:",states);
+    print("\tposted:",len(flows),"flows");
+        
 
 if __name__ == '__main__':
 
@@ -292,6 +360,7 @@ if __name__ == '__main__':
 
     while t + MAX_TIME > time():
 
+        t1 = time();
         #get link params
         data = getLinkParams();
 
@@ -307,5 +376,8 @@ if __name__ == '__main__':
         #update flow rule
         updateFlowRule(flows);
 
+        print("\ttime exec:", time() - t1, "s");
+
         t += ROUND_TIME;
         sleep(ROUND_TIME);
+        print("-----------------------------------------------------------\n")
