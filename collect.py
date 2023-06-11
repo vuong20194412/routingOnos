@@ -9,7 +9,7 @@ SLEEP_TIME = 3;
 EXEC_TIME = 1;
 ROUND_TIME = SLEEP_TIME + EXEC_TIME;
 MAX_TIME = ROUND_TIME * 3600;
-TIMEOUT_FLOW_TIME = ROUND_TIME;
+TIMEOUT_FLOW_TIME = SLEEP_TIME;
 LIFE_FLOW_TIME = ROUND_TIME;
 
 TOTAL_RATE = 1/3;
@@ -67,28 +67,32 @@ def getLinkParams():
         responseDst = get('/statistics/delta/ports/%(device)s/%(port)s' 
                           % {'device': dst['device'], 'port': dst['port']});
         
-        statisticSrc = responseSrc['statistics'][0]['ports'];
-        statisticDst = responseDst['statistics'][0]['ports'];
-    
-        if len(statisticSrc) > 0 and len(statisticDst) > 0:
-        
-            statisticSrc = statisticSrc[0];
-            statisticDst = statisticDst[0];
-
-            # calculate totalRate
-            sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']);
-            sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']);
-            totalRate =  sentRateSrc + sentRateDst;
-
-            # calculate lossPacketsPercent
-            totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
-            lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
-            if lossPackets < 0: #khong sao vi tre
-                lossPackets = 0;
-            lossPacketsPercent = lossPackets / totalSentPackets * 100;
-        else:
+        if 'statistics' not in responseSrc or 'statistics' not in responseDst:
             totalRate = TOTAL_RATE_NO_UNSPECIFIED;
             lossPacketsPercent = LOSS_PACKETS_PERCENT_NO_UNSPECIFIED;
+        else:
+            statisticSrc = responseSrc['statistics'][0]['ports'];
+            statisticDst = responseDst['statistics'][0]['ports'];
+        
+            if len(statisticSrc) > 0 and len(statisticDst) > 0:
+            
+                statisticSrc = statisticSrc[0];
+                statisticDst = statisticDst[0];
+
+                # calculate totalRate
+                sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']);
+                sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']);
+                totalRate =  sentRateSrc + sentRateDst;
+
+                # calculate lossPacketsPercent
+                totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
+                lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
+                if lossPackets < 0: #khong sao vi tre
+                    lossPackets = 0;
+                lossPacketsPercent = lossPackets / totalSentPackets * 100;
+            else:
+                totalRate = TOTAL_RATE_NO_UNSPECIFIED;
+                lossPacketsPercent = LOSS_PACKETS_PERCENT_NO_UNSPECIFIED;
 
         # push to data
         data['deviceSrc'].append(src['device']);
@@ -306,6 +310,8 @@ def createFlows(path):
 
     for deviceId1 in deviceMac:
 
+        if deviceId1 not in path: continue;
+
         # case: hostMac is dstMac
         for hostMac in deviceMac[deviceId1]:
             port = deviceMac[deviceId1][hostMac];
@@ -314,6 +320,8 @@ def createFlows(path):
         for deviceId2 in deviceMac:
 
             if deviceId2 == deviceId1: continue;
+
+            if deviceId2 not in path: continue;
 
             for hostMac2 in deviceMac[deviceId2]:
 
@@ -379,5 +387,5 @@ if __name__ == '__main__':
         print("\ttime exec:", time() - t1, "s");
 
         t += ROUND_TIME;
-        sleep(ROUND_TIME);
+        sleep(SLEEP_TIME);
         print("-----------------------------------------------------------\n")
