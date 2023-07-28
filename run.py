@@ -73,28 +73,20 @@ def getLinkParams():
         responseDst = get(f"/statistics/delta/ports/{dst['device']}/{dst['port']}", 'statistics');
 
         try:
-            statisticSrc = responseSrc['statistics'][0]['ports'];
-            statisticDst = responseDst['statistics'][0]['ports'];
+            statisticSrc = responseSrc[0]['ports'][0];
+            statisticDst = responseDst[0]['ports'][0];
 
-            if len(statisticSrc) > 0 and len(statisticDst) > 0:
+            # calculate totalRate
+            sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']) if statisticSrc['durationSec'] > 0 else 0;
+            sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']) if statisticDst['durationSec'] > 0 else 0;
+            totalRate =  sentRateSrc + sentRateDst;
 
-                statisticSrc = statisticSrc[0];
-                statisticDst = statisticDst[0];
-
-                # calculate totalRate
-                sentRateSrc = float(statisticSrc['bytesSent'])/float(statisticSrc['durationSec']) if statisticSrc['durationSec'] > 0 else 0;
-                sentRateDst = float(statisticDst['bytesSent'])/float(statisticDst['durationSec']) if statisticDst['durationSec'] > 0 else 0;
-                totalRate =  sentRateSrc + sentRateDst;
-
-                # calculate lossPacketsPercent
-                totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
-                lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
-                if lossPackets < 0 or totalSentPackets < 0: #khong sao vi tre
-                    lossPackets = 0;
-                lossPacketsPercent = lossPackets / (totalSentPackets + 10**-8) * 100;
-            else:
-                totalRate = UNSPECIFIED;
-                lossPacketsPercent = UNSPECIFIED;
+            # calculate lossPacketsPercent
+            totalSentPackets = float(statisticSrc['packetsSent']) + float(statisticDst['packetsSent']);
+            lossPackets = totalSentPackets - float(statisticSrc['packetsReceived']) - float(statisticDst['packetsReceived']);
+            if lossPackets < 0 or totalSentPackets < 0: #khong sao vi tre
+                lossPackets = 0;
+            lossPacketsPercent = lossPackets / (totalSentPackets + 10**-8) * 100;
         except:
             totalRate = UNSPECIFIED;
             lossPacketsPercent = UNSPECIFIED;
